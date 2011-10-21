@@ -134,8 +134,7 @@ module Actions
   end
 
   def cleanup_zombie_processes
-    full_stats = stats
-    zombies = (ps_pids - full_stats.keys).inject({}) do |hash, pid|
+    zombies = (ps_pids - passenger_status.keys).inject({}) do |hash, pid|
       hash[pid] = {}
       hash
     end
