@@ -123,6 +123,16 @@ module Actions
     kill oldies, "Old"
   end
 
+  def cleanup_stale_processes
+    stale = stats.keep_if do |pid, stats|
+      # This is certainly not foul proof, so we may end up killing processes
+      # simply due to bad timing, but the profit outweighs the risk I think.
+      stats[:sessions] > 0 and stats[:processed] < 10 and stats[:uptime] >= @stale_ttl
+    end
+
+    kill stale, "Stale"
+  end
+
   def cleanup_zombie_processes
     full_stats = stats
     zombies = (ps_pids - full_stats.keys).inject({}) do |hash, pid|
@@ -186,10 +196,11 @@ class PassengerJanitor
 end
 
 options = {
-  :grace   => 30,
-  :max_mem => 1024,
-  :ttl     => 4 * 3600,
-  :dry_run => false
+  :grace     => 30,
+  :max_mem   => 1024,
+  :ttl       => 3600  * 4,
+  :stale_ttl => 3600,
+  :dry_run   => false
 }
 
 OptionParser.new do |opts|
@@ -205,6 +216,7 @@ OptionParser.new do |opts|
 
       Old:    The process has exceeded time to live (--ttl).
       Fat:    The process is consuming too much memory (--max-mem).
+      Stale:  The process has a non-empty queue, few processed and high uptime (--stale-ttl).
       Zombie: The process exists but is not listed in passenger-status.
 
     Usage:
@@ -213,9 +225,10 @@ OptionParser.new do |opts|
     Options:
   BANNER
 
-  opts.on("-m", "--max-mem [MEGABYTE]", Integer, "Kill processes with more than MEGABYTE memory use.") {|i| options[:max_mem] = i }
-  opts.on("-t", "--ttl [SECONDS]",      Integer, "Kill processes with more than SECONDS uptime.")      {|i| options[:ttl]     = i }
-  opts.on("-g", "--grace [SECONDS]",    Integer, "Give processes SECONDS to die gracefully.")          {|i| options[:grace]   = i }
+  opts.on("-m", "--max-mem [MEGABYTE]",  Integer, "Kill processes with more than MEGABYTE memory use.")            {|i| options[:max_mem]   = i }
+  opts.on("-t", "--ttl [SECONDS]",       Integer, "Kill processes with more than SECONDS uptime.")                 {|i| options[:ttl]       = i }
+  opts.on("-s", "--stale-ttl [SECONDS]", Integer, "Kill seemingly stale processes with more than SECONDS uptime.") {|i| options[:stale_ttl] = i }
+  opts.on("-g", "--grace [SECONDS]",     Integer, "Give processes SECONDS to die gracefully.")                     {|i| options[:grace]     = i }
 
   opts.on("-n", "--dry-run", "Don't actually kill processes.") { options[:dry_run] = true }
   opts.on("-h", "--help",    "Show this.") { puts opts; exit }
