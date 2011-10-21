@@ -87,8 +87,7 @@ module Status
   def stats
     # Memory stats may show more processes than status.
     status = passenger_status
-    passenger_memory_stats.values.inject({}) do |hash, stats|
-      pid = stats[:pid]
+    passenger_memory_stats.each_pair.inject({}) do |hash, (pid, stats)|
       hash[pid] = stats
       stats.merge! status[pid] if status[pid]
 
@@ -99,14 +98,25 @@ module Status
   def ps_pids
     IO.popen("ps -eo pid,args") do |pipe|
       pipe.readlines.map do |line|
-        next unless line =~ /(\d+)\s+Rack: /
-        $1.to_i
+        line =~ /(\d+)\s+Rack: / and $1.to_i
       end.compact
     end
   end
 end
 
 module Actions
+  # Sometimes the data from passenger_status is not available (:uptime etc.) so
+  # use .to_i just in case.
+
+  def cleanup_zombie_processes
+    zombies = (ps_pids - stats.keys).inject({}) do |hash, pid|
+      hash[pid] = {}
+      hash
+    end
+
+    kill zombies, "Zombie"
+  end
+
   def cleanup_fat_processes
     fatties = stats.keep_if do |pid, stats|
       stats[:mem] >= @max_mem
@@ -117,7 +127,7 @@ module Actions
 
   def cleanup_old_processes
     oldies = stats.keep_if do |pid, stats|
-      stats[:uptime] >= @ttl
+      stats[:uptime].to_i >= @ttl
     end
 
     kill oldies, "Old"
@@ -127,19 +137,10 @@ module Actions
     stale = stats.keep_if do |pid, stats|
       # This is certainly not foul proof, so we may end up killing processes
       # simply due to bad timing, but the profit outweighs the risk I think.
-      stats[:sessions] > 0 and stats[:processed] < 10 and stats[:uptime] >= @stale_ttl
+      stats[:sessions].to_i > 0 and stats[:processed].to_i < 10 and stats[:uptime].to_i >= @stale_ttl
     end
 
     kill stale, "Stale"
-  end
-
-  def cleanup_zombie_processes
-    zombies = (ps_pids - passenger_status.keys).inject({}) do |hash, pid|
-      hash[pid] = {}
-      hash
-    end
-
-    kill zombies, "Zombie"
   end
 end
 
