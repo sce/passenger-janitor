@@ -52,7 +52,6 @@ module Status
         end.inject(0, &:+)
 
         hash[pid.to_i] = {
-          :pid       => pid.to_i,
           :sessions  => sessions.to_i,
           :processed => processed.to_i,
           :uptime    => seconds
@@ -72,7 +71,6 @@ module Status
         pid, mem, name = *match.captures
 
         hash[pid.to_i] = {
-          :pid  => pid.to_i,
           :mem  => mem.to_i,
           :name => name
         }
@@ -155,13 +153,13 @@ module Util
 
     puts %(%s: %d processes.) % [why, process_stats.size]
 
-    process_stats.each_value do |stats|
-      puts %(%s: %s: Killing process with USR1 ... %s) % [why, stats[:pid], stats.inspect]
-      Process.kill(:USR1, stats[:pid]) unless @dry_run
+    process_stats.each_pair do |pid, stats|
+      puts %(%s: %s: Killing process with USR1 ... %s) % [why, pid, stats.inspect]
+      Process.kill(:USR1, pid) unless @dry_run
     end
 
     grace_time
-    remaining = (ps_pids & process_stats.values.map {|s| s[:pid]})
+    remaining = (ps_pids & process_stats.keys)
     return if remaining.empty?
 
     remaining.each do |pid|
@@ -170,7 +168,7 @@ module Util
     end
 
     grace_time
-    remaining = (ps_pids & process_stats.values.map {|s| s[:pid]})
+    remaining = (ps_pids & process_stats.keys)
     return if remaining.empty?
 
     puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
