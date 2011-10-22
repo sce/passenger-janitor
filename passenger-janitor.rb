@@ -204,10 +204,7 @@ module CleanupActions
       stats[:uptime].to_i >= @options[:old]
     end
 
-    # From experience old processes refuse to die when receiving USR1 which
-    # indicates that they're possibly stuck (which is why we want to kill them
-    # in the first place). So try to get a stacktrace:
-    kill oldies, "Old", :SIGABRT
+    kill oldies, "Old"
   end
 end
 
