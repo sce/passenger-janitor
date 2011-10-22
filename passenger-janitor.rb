@@ -145,7 +145,7 @@ module Stats
         next hash unless match = line.match(/(\d+)\s+Rack: (.+)$/)
         pid, name = *match.captures
 
-        hash[pid.to_i] = { :name => name }
+        hash[pid.to_i] = { :name => name.strip }
         hash
       end
     end
