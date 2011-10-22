@@ -153,7 +153,7 @@ end
 # they'll be executed in the order they are defined.
 module Actions
 
-  # Kill processes that don't show up in passenger-status.
+  # Kill Rack processes that don't show up in passenger-status.
   def cleanup_zombie_processes
     zombies = (ps_pids - stats.keys).inject({}) do |hash, pid|
       hash[pid] = {}
@@ -178,8 +178,7 @@ module Actions
   # due to bad timing, but the profit outweighs the risk I think.
   def cleanup_stale_processes
     stale = stats.keep_if do |pid, stats|
-      # Sometimes the data from passenger_status is not available (:uptime
-      # etc.) so use .to_i just in case.
+      # Zombies that were not successfully killed don't have :sessions etc.
       stats[:sessions].to_i > 0 and stats[:processed].to_i < 10 and stats[:uptime].to_i >= @stale_ttl
     end
 
@@ -231,12 +230,14 @@ OptionParser.new do |opts|
 
     It must be run as root (or rvmsudo) to work properly.
 
-    Reasons to kill:
+    Reasons to kill (with config option in round brackets):
 
       Old:    The process has exceeded time to live (--ttl).
       Fat:    The process is consuming too much memory (--max-mem).
       Stale:  The process has a non-empty queue, few processed and high uptime (--stale-ttl).
       Zombie: The process exists but is not listed in passenger-status.
+
+    All reasons are used by default. Use options to change default values.
 
     Usage:
       #{$0} [options]
@@ -244,13 +245,24 @@ OptionParser.new do |opts|
     Options:
   BANNER
 
-  opts.on("-m", "--max-mem [MEGABYTE]",  Integer, "Kill processes with more than MEGABYTE memory use.")            {|i| options[:max_mem]   = i }
-  opts.on("-t", "--ttl [SECONDS]",       Integer, "Kill processes with more than SECONDS uptime.")                 {|i| options[:ttl]       = i }
-  opts.on("-s", "--stale-ttl [SECONDS]", Integer, "Kill seemingly stale processes with more than SECONDS uptime.") {|i| options[:stale_ttl] = i }
-  opts.on("-g", "--grace [SECONDS]",     Integer, "Give processes SECONDS to die gracefully.")                     {|i| options[:grace]     = i }
+  opts.on("-m", "--max-mem [MEGABYTE]", Integer,
+    "Kill processes with more than MEGABYTE (#{options[:max_mem]}) memory use.") \
+    {|i| options[:max_mem] = i }
+
+  opts.on("-t", "--ttl [SECONDS]", Integer,
+    "Kill processes with more than SECONDS (#{options[:ttl]}) uptime.") \
+    {|i| options[:ttl] = i }
+
+  opts.on("-s", "--stale-ttl [SECONDS]", Integer,
+    "Kill seemingly stale processes with more than SECONDS (#{options[:stale_ttl]}) uptime.") \
+    {|i| options[:stale_ttl] = i }
+
+  opts.on("-g", "--grace [SECONDS]", Integer,
+    "Give processes SECONDS (#{options[:grace]}) to die gracefully.") \
+    {|i| options[:grace] = i }
 
   opts.on("-n", "--dry-run", "Don't actually kill processes.") { options[:dry_run] = true }
-  opts.on("-h", "--help",    "Show this.") { puts opts; exit }
+  opts.on("-h", "--help",    "Show this.")                     { puts opts; exit }
 end.parse!
 
 PassengerJanitor.new(options).run
