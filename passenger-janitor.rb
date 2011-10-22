@@ -49,14 +49,14 @@ module Util
     sleep @options[:grace]
   end
 
-  def kill(process_stats, why)
+  def kill(process_stats, why, signal=:USR1)
     return if process_stats.empty?
 
     puts %(%s: %d processes.) % [why, process_stats.size]
 
     process_stats.each_pair do |pid, stats|
-      puts %(%s: %s: Killing process with USR1 ... %s) % [why, pid, stats.inspect]
-      Process.kill(:USR1, pid) unless @options[:dry_run]
+      puts %(%s: %s: Killing process with %s ... %s) % [why, pid, signal, stats.inspect]
+      Process.kill(signal, pid) unless @options[:dry_run]
     end
 
     grace_time
@@ -157,6 +157,12 @@ end
 # and they'll be executed in the order they are defined.
 module CleanupActions
 
+  # From http://www.modrails.com/documentation/Users%20guide%20Apache.html#debugging_frozen :
+  #
+  #   If one of your application instances is frozen (stopped responding), then
+  #   you can figure out where it is frozen by killing it with SIGABRT. This
+  #   will cause the application to raise an exception, with a backtrace.
+
   # Kill Rack processes that don't show up in passenger-status (though they
   # might show up in passenger-memory-stats).
   def zombies
@@ -165,7 +171,7 @@ module CleanupActions
       passenger_pids.include? pid
     end
 
-    kill zombies, "Zombie"
+    kill zombies, "Zombie", :SIGABRT
   end
 
   def fat
@@ -189,7 +195,7 @@ module CleanupActions
       stats[:uptime].to_i    >= @options[:stale]
     end
 
-    kill stale, "Stale"
+    kill stale, "Stale", :SIGABRT
   end
 
   # Processes that have lived for a "long" time might have gone stale.
@@ -198,7 +204,10 @@ module CleanupActions
       stats[:uptime].to_i >= @options[:old]
     end
 
-    kill oldies, "Old"
+    # From experience old processes refuse to die when receiving USR1 which
+    # indicates that they're possibly stuck (which is why we want to kill them
+    # in the first place). So try to get a stacktrace:
+    kill oldies, "Old", :SIGABRT
   end
 end
 
