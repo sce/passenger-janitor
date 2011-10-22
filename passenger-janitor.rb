@@ -60,7 +60,7 @@ module Util
     end
 
     grace_time
-    remaining = (ps_pids & process_stats.keys)
+    remaining = (ps_stats.keys & process_stats.keys)
     return if remaining.empty?
 
     remaining.each do |pid|
@@ -69,7 +69,7 @@ module Util
     end
 
     grace_time
-    remaining = (ps_pids & process_stats.keys)
+    remaining = (ps_stats.keys & process_stats.keys)
     return if remaining.empty?
 
     puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
@@ -139,11 +139,15 @@ module Stats
     end
   end
 
-  def ps_pids
+  def ps_stats
     command("ps -eo pid,args") do |input, output|
-      output.readlines.map do |line|
-        line =~ /(\d+)\s+Rack: / and $1.to_i
-      end.compact
+      output.readlines.inject({}) do |hash, line|
+        next hash unless match = line.match(/(\d+)\s+Rack: (.+)$/)
+        pid, name = *match.captures
+
+        hash[pid.to_i] = { :name => name }
+        hash
+      end
     end
   end
 
@@ -156,9 +160,9 @@ module Actions
   # Kill Rack processes that don't show up in passenger-status (though they
   # might show up in passenger-memory-stats).
   def cleanup_zombie_processes
-    zombies = (ps_pids - passenger_status.keys).inject({}) do |hash, pid|
-      hash[pid] = {}
-      hash
+    passenger_pids = passenger_status.keys
+    zombies = ps_stats.delete_if do |pid|
+      passenger_pids.include? pid
     end
 
     kill zombies, "Zombie"
