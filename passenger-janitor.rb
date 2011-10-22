@@ -45,8 +45,8 @@ module Util
   end
 
   def grace_time
-    puts %((zzz for %s seconds...)) % @grace
-    sleep @grace
+    puts %((zzz for %s seconds...)) % @options[:grace]
+    sleep @options[:grace]
   end
 
   def kill(process_stats, why)
@@ -56,7 +56,7 @@ module Util
 
     process_stats.each_pair do |pid, stats|
       puts %(%s: %s: Killing process with USR1 ... %s) % [why, pid, stats.inspect]
-      Process.kill(:USR1, pid) unless @dry_run
+      Process.kill(:USR1, pid) unless @options[:dry_run]
     end
 
     grace_time
@@ -65,7 +65,7 @@ module Util
 
     remaining.each do |pid|
       puts %(%s: %s: Still not dead, killing process with KILL ...) % [why, pid]
-      Process.kill(:KILL, pid) unless @dry_run
+      Process.kill(:KILL, pid) unless @options[:dry_run]
     end
 
     grace_time
@@ -153,13 +153,13 @@ module Stats
 
 end
 
-# Each method in this module will be called when running this script, and
-# they'll be executed in the order they are defined.
-module Actions
+# Methods from this module will potentially be called when running this script,
+# and they'll be executed in the order they are defined.
+module CleanupActions
 
   # Kill Rack processes that don't show up in passenger-status (though they
   # might show up in passenger-memory-stats).
-  def cleanup_zombie_processes
+  def zombies
     passenger_pids = passenger_status.keys
     zombies = ps_stats.delete_if do |pid|
       passenger_pids.include? pid
@@ -168,9 +168,9 @@ module Actions
     kill zombies, "Zombie"
   end
 
-  def cleanup_fat_processes
+  def fat
     fatties = stats.keep_if do |pid, stats|
-      stats[:mem] >= @max_mem
+      stats[:mem] >= @options[:fat]
     end
 
     kill fatties, "Fat"
@@ -181,21 +181,21 @@ module Actions
   #
   # This is certainly not foul proof, so we may end up killing processes simply
   # due to bad timing, but the profit outweighs the risk I think.
-  def cleanup_stale_processes
+  def stale
     stale = stats.keep_if do |pid, stats|
       # Zombies that were not successfully killed don't have :sessions etc.
       stats[:sessions].to_i  >  0  and
       stats[:processed].to_i <  10 and
-      stats[:uptime].to_i    >= @options.stale
+      stats[:uptime].to_i    >= @options[:stale]
     end
 
     kill stale, "Stale"
   end
 
   # Processes that have lived for a "long" time might have gone stale.
-  def cleanup_old_processes
+  def old
     oldies = stats.keep_if do |pid, stats|
-      stats[:uptime].to_i >= @ttl
+      stats[:uptime].to_i >= @options[:old]
     end
 
     kill oldies, "Old"
@@ -203,29 +203,33 @@ module Actions
 end
 
 class PassengerJanitor
-  include Actions
-  include Stats
   include Util
+  include Stats
+  include CleanupActions
 
   def initialize(options)
-    options.each_pair do |k, v|
-      instance_variable_set "@#{k}", v
-    end
+    @options = options
   end
 
   def run
-    Actions.instance_methods.each do |name|
+    actions = CleanupActions.instance_methods.find_all {|name| @options.key? name}
+    abort @options[:opts].to_s if actions.empty?
+
+    actions.each do |name|
       send name
     end
   end
 end
 
+defaults = {
+  :fat     => 1024,
+  :old     => 3600 * 4,
+  :stale   => 3600
+}
+
 options = {
-  :grace     => 30,
-  :max_mem   => 1024,
-  :ttl       => 3600  * 4,
-  :stale_ttl => 3600,
-  :dry_run   => false
+  :grace   => 30,
+  :dry_run => false
 }
 
 OptionParser.new do |opts|
@@ -235,41 +239,44 @@ OptionParser.new do |opts|
     This program will run passenger-status and passenger-memory-stats and use
     the returned information to determine which processes to kill.
 
-    It must be run as root (or rvmsudo) to work properly.
+    It must be run as root (or rvmsudo) to work properly. No output is given
+    unless attempting to kill a process, making it suitable for use with cron.
 
-    Reasons to kill (with config option in round brackets):
-
-      Old:    The process has exceeded time to live (--ttl).
-      Fat:    The process is consuming too much memory (--max-mem).
-      Stale:  The process has a non-empty queue, few processed and high uptime (--stale-ttl).
-      Zombie: The process exists but is not listed in passenger-status.
-
-    All reasons are used by default. Use options to change default values.
+    Use options to activate a reason and possibly change default values.
 
     Usage:
       #{$0} [options]
 
-    Options:
+    Categories to kill (with default values in round brackets):
   BANNER
 
-  opts.on("-m", "--max-mem [MEGABYTE]", Integer,
-    "Kill processes with more than MEGABYTE (#{options[:max_mem]}) memory use.") \
-    {|i| options[:max_mem] = i }
+  opts.on("-f[MEGABYTES]", "--fat[=MEGABYTES]", Integer,
+    "Kill processes with more than MEGABYTE (#{defaults[:fat]}) memory use.") \
+    {|i| options[:fat] = i || defaults[:fat]}
 
-  opts.on("-t", "--ttl [SECONDS]", Integer,
-    "Kill processes with more than SECONDS (#{options[:ttl]}) uptime.") \
-    {|i| options[:ttl] = i }
+  opts.on("-o[SECONDS]", "--old[=SECONDS]", Integer,
+    "Kill processes with more than SECONDS (#{defaults[:old]}) uptime.") \
+    {|i| options[:old] = i || defaults[:old]}
 
-  opts.on("-s", "--stale-ttl [SECONDS]", Integer,
-    "Kill seemingly stale processes with more than SECONDS (#{options[:stale_ttl]}) uptime.") \
-    {|i| options[:stale_ttl] = i }
+  opts.on("-s[SECONDS]", "--stale[=SECONDS]", Integer,
+    "Kill seemingly stale processes with more than SECONDS (#{defaults[:stale]}) uptime.") \
+    {|i| options[:stale] = i || defaults[:stale]}
 
-  opts.on("-g", "--grace [SECONDS]", Integer,
+  opts.on("-z", "--zombies",
+    "Kill Rack processes that don't show up in passenger-status.") \
+    { options[:zombies] = true }
+
+  opts.separator ""
+  opts.separator "Common options:"
+
+  opts.on("-gSECONDS", "--grace SECONDS", Integer,
     "Give processes SECONDS (#{options[:grace]}) to die gracefully.") \
     {|i| options[:grace] = i }
 
   opts.on("-n", "--dry-run", "Don't actually kill processes.") { options[:dry_run] = true }
   opts.on("-h", "--help",    "Show this.")                     { puts opts; exit }
+
+  options[:opts] = opts
 end.parse!
 
 PassengerJanitor.new(options).run
