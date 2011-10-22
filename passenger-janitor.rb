@@ -28,12 +28,13 @@
 #
 
 require 'optparse'
+require 'open3'
 
 module Status
+
   def passenger_status
-    IO.popen("passenger-status 2>&1") do |pipe|
-      pipe.readlines.inject({}) do |hash, line|
-        abort line if line =~ /ERROR/
+    command("passenger-status") do |input, output|
+      output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/PID: (\d+)\s+Sessions: (\d+)\s+Processed: (\d+)\s*Uptime: ([\w ]+)/)
 
         pid, sessions, processed, uptime = *match.captures
@@ -63,9 +64,8 @@ module Status
   end
 
   def passenger_memory_stats
-    IO.popen("passenger-memory-stats 2>&1") do |pipe|
-      pipe.readlines.inject({}) do |hash, line|
-        abort line if line =~ /ERROR/
+    command("passenger-memory-stats") do |input, output|
+      output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/([\d\.]+)\s+[\d\.]+ MB\s+([\d\.]+) MB\s+Rack: (.+)/)
 
         pid, mem, name = *match.captures
@@ -94,12 +94,13 @@ module Status
   end
 
   def ps_pids
-    IO.popen("ps -eo pid,args") do |pipe|
-      pipe.readlines.map do |line|
+    command("ps -eo pid,args") do |input, output|
+      output.readlines.map do |line|
         line =~ /(\d+)\s+Rack: / and $1.to_i
       end.compact
     end
   end
+
 end
 
 # Each method in this module will be called when running this script, and
@@ -152,6 +153,19 @@ module Actions
 end
 
 module Util
+  private
+
+  # Yield with input/output pipe to given command. Abort if stderr from command
+  # is non-empty.
+  def command(cmd)
+    Open3.popen3(cmd) do |input, output, err|
+      errors = err.readlines
+      abort "%s\n%s" % [cmd, errors.join] if errors.any?
+
+      yield input, output if block_given?
+    end
+  end
+
   def grace_time
     puts %((zzz for %s seconds...)) % @grace
     sleep @grace
