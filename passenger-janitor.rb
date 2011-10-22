@@ -30,7 +30,53 @@
 require 'optparse'
 require 'open3'
 
-module Status
+module Util
+  private
+
+  # Yield with input/output pipe to given command. Abort if stderr from command
+  # is non-empty.
+  def command(cmd)
+    Open3.popen3(cmd) do |input, output, err|
+      errors = err.readlines
+      abort "%s\n%s" % [cmd, errors.join] if errors.any?
+
+      yield input, output if block_given?
+    end
+  end
+
+  def grace_time
+    puts %((zzz for %s seconds...)) % @grace
+    sleep @grace
+  end
+
+  def kill(process_stats, why)
+    return if process_stats.empty?
+
+    puts %(%s: %d processes.) % [why, process_stats.size]
+
+    process_stats.each_pair do |pid, stats|
+      puts %(%s: %s: Killing process with USR1 ... %s) % [why, pid, stats.inspect]
+      Process.kill(:USR1, pid) unless @dry_run
+    end
+
+    grace_time
+    remaining = (ps_pids & process_stats.keys)
+    return if remaining.empty?
+
+    remaining.each do |pid|
+      puts %(%s: %s: Still not dead, killing process with KILL ...) % [why, pid]
+      Process.kill(:KILL, pid) unless @dry_run
+    end
+
+    grace_time
+    remaining = (ps_pids & process_stats.keys)
+    return if remaining.empty?
+
+    puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
+  end
+end
+
+module Stats
 
   def passenger_status
     command("passenger-status") do |input, output|
@@ -117,7 +163,6 @@ module Actions
     kill zombies, "Zombie"
   end
 
-  # Kill processes with too high memory usage.
   def cleanup_fat_processes
     fatties = stats.keep_if do |pid, stats|
       stats[:mem] >= @max_mem
@@ -141,8 +186,7 @@ module Actions
     kill stale, "Stale"
   end
 
-  # Kill processes that have lived for a "long" time. These might have gone
-  # stale.
+  # Processes that have lived for a "long" time might have gone stale.
   def cleanup_old_processes
     oldies = stats.keep_if do |pid, stats|
       stats[:uptime].to_i >= @ttl
@@ -152,55 +196,9 @@ module Actions
   end
 end
 
-module Util
-  private
-
-  # Yield with input/output pipe to given command. Abort if stderr from command
-  # is non-empty.
-  def command(cmd)
-    Open3.popen3(cmd) do |input, output, err|
-      errors = err.readlines
-      abort "%s\n%s" % [cmd, errors.join] if errors.any?
-
-      yield input, output if block_given?
-    end
-  end
-
-  def grace_time
-    puts %((zzz for %s seconds...)) % @grace
-    sleep @grace
-  end
-
-  def kill(process_stats, why)
-    return if process_stats.empty?
-
-    puts %(%s: %d processes.) % [why, process_stats.size]
-
-    process_stats.each_pair do |pid, stats|
-      puts %(%s: %s: Killing process with USR1 ... %s) % [why, pid, stats.inspect]
-      Process.kill(:USR1, pid) unless @dry_run
-    end
-
-    grace_time
-    remaining = (ps_pids & process_stats.keys)
-    return if remaining.empty?
-
-    remaining.each do |pid|
-      puts %(%s: %s: Still not dead, killing process with KILL ...) % [why, pid]
-      Process.kill(:KILL, pid) unless @dry_run
-    end
-
-    grace_time
-    remaining = (ps_pids & process_stats.keys)
-    return if remaining.empty?
-
-    puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
-  end
-end
-
 class PassengerJanitor
   include Actions
-  include Status
+  include Stats
   include Util
 
   def initialize(options)
