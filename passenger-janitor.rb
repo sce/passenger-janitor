@@ -180,7 +180,9 @@ module Actions
   def cleanup_stale_processes
     stale = stats.keep_if do |pid, stats|
       # Zombies that were not successfully killed don't have :sessions etc.
-      stats[:sessions].to_i > 0 and stats[:processed].to_i < 10 and stats[:uptime].to_i >= @stale_ttl
+      stats[:sessions].to_i  >  0  and
+      stats[:processed].to_i <  10 and
+      stats[:uptime].to_i    >= @options.stale
     end
 
     kill stale, "Stale"
