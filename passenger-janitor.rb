@@ -153,9 +153,10 @@ end
 # they'll be executed in the order they are defined.
 module Actions
 
-  # Kill Rack processes that don't show up in passenger-status.
+  # Kill Rack processes that don't show up in passenger-status (though they
+  # might show up in passenger-memory-stats).
   def cleanup_zombie_processes
-    zombies = (ps_pids - stats.keys).inject({}) do |hash, pid|
+    zombies = (ps_pids - passenger_status.keys).inject({}) do |hash, pid|
       hash[pid] = {}
       hash
     end
