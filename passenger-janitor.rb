@@ -102,10 +102,11 @@ module Status
   end
 end
 
+# Each method in this module will be called when running this script, and
+# they'll be executed in the order they are defined.
 module Actions
-  # Sometimes the data from passenger_status is not available (:uptime etc.) so
-  # use .to_i just in case.
 
+  # Kill processes that don't show up in passenger-status.
   def cleanup_zombie_processes
     zombies = (ps_pids - stats.keys).inject({}) do |hash, pid|
       hash[pid] = {}
@@ -115,6 +116,7 @@ module Actions
     kill zombies, "Zombie"
   end
 
+  # Kill processes with too high memory usage.
   def cleanup_fat_processes
     fatties = stats.keep_if do |pid, stats|
       stats[:mem] >= @max_mem
@@ -123,22 +125,29 @@ module Actions
     kill fatties, "Fat"
   end
 
+  # Kill processes we think are stale (non-empty queue and processed few
+  # requests over a long period).
+  #
+  # This is certainly not foul proof, so we may end up killing processes simply
+  # due to bad timing, but the profit outweighs the risk I think.
+  def cleanup_stale_processes
+    stale = stats.keep_if do |pid, stats|
+      # Sometimes the data from passenger_status is not available (:uptime
+      # etc.) so use .to_i just in case.
+      stats[:sessions].to_i > 0 and stats[:processed].to_i < 10 and stats[:uptime].to_i >= @stale_ttl
+    end
+
+    kill stale, "Stale"
+  end
+
+  # Kill processes that have lived for a "long" time. These might have gone
+  # stale.
   def cleanup_old_processes
     oldies = stats.keep_if do |pid, stats|
       stats[:uptime].to_i >= @ttl
     end
 
     kill oldies, "Old"
-  end
-
-  def cleanup_stale_processes
-    stale = stats.keep_if do |pid, stats|
-      # This is certainly not foul proof, so we may end up killing processes
-      # simply due to bad timing, but the profit outweighs the risk I think.
-      stats[:sessions].to_i > 0 and stats[:processed].to_i < 10 and stats[:uptime].to_i >= @stale_ttl
-    end
-
-    kill stale, "Stale"
   end
 end
 
