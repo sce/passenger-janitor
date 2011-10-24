@@ -75,6 +75,7 @@ module Util
   def grace_time
     puts %((zzz for %s seconds...)\n\n) % @options[:grace]
     sleep @options[:grace]
+    @logs.each { |log| log.eof? or puts(log.readlines, "") }
   end
 
   def kill(process_stats, why, signal=:USR1)
@@ -247,17 +248,13 @@ class PassengerJanitor
     actions = CleanupActions.instance_methods.find_all {|name| @options.key? name}
     abort @options[:opts].to_s if actions.empty?
 
-    logs = @options[:tail].compact.map {|file| tail file }
+    @logs = @options[:tail].compact.map {|file| tail file }
 
     actions.each do |name|
       send name
-
-      logs.each do |log|
-        puts log.readlines
-      end
     end
 
-    logs.each do |log|
+    @logs.each do |log|
       log.close
     end
   end
