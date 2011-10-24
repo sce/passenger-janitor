@@ -50,8 +50,30 @@ module Util
     end
   end
 
+  # Yield or return with a read pipe at the end of file. Pipe is nil when
+  # filename is nil.
+  def tail(filename)
+    if filename
+      if block_given?
+        File.open(filename) do |pipe|
+          pipe.seek(0, IO::SEEK_END)
+
+          yield pipe
+        end
+
+      else
+        pipe = File.open(filename)
+        pipe.seek(0, IO::SEEK_END)
+        pipe
+      end
+
+    elsif block_given?
+      yield
+    end
+  end
+
   def grace_time
-    puts %((zzz for %s seconds...)) % @options[:grace]
+    puts %((zzz for %s seconds...)\n\n) % @options[:grace]
     sleep @options[:grace]
   end
 
@@ -76,7 +98,7 @@ module Util
     grace_time
     return if (remaining = ps_stats.keys & process_stats.keys).empty?
 
-    puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
+    puts %(%s: %d processes STILL not dead (%s).\n\n) % [why, remaining.size, remaining.join(", ")]
   end
 end
 
@@ -225,10 +247,21 @@ class PassengerJanitor
     actions = CleanupActions.instance_methods.find_all {|name| @options.key? name}
     abort @options[:opts].to_s if actions.empty?
 
+    logs = @options[:tail].compact.map {|file| tail file }
+
     actions.each do |name|
       send name
+
+      logs.each do |log|
+        puts log.readlines
+      end
+    end
+
+    logs.each do |log|
+      log.close
     end
   end
+
 end
 
 defaults = {
@@ -239,7 +272,8 @@ defaults = {
 
 options = {
   :grace   => 30,
-  :dry_run => false
+  :dry_run => false,
+  :tail    => []
 }
 
 OptionParser.new do |opts|
@@ -275,6 +309,13 @@ OptionParser.new do |opts|
   opts.on("-z", "--zombies",
     "Kill Rack processes that don't show up in passenger-status.") \
     { options[:zombies] = true }
+
+  opts.separator ""
+  opts.separator "Extra output options:"
+
+  opts.on("--tail=LOGFILE1,LOGFILE2", Array,
+    "Tail LOGFILEs and copy output to standard out while running.") \
+    {|a| options[:tail].concat a }
 
   opts.separator ""
   opts.separator "Common options:"
