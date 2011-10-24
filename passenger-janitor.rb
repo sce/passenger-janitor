@@ -26,9 +26,15 @@
 #
 # Inspired by other passenger process killing scripts on github.
 #
+# Only tested on Linux.
+#
 
 require 'optparse'
 require 'open3'
+
+PASSENGER_STATUS       = "passenger-status"
+PASSENGER_MEMORY_STATS = "passenger-memory-stats"
+PS_STATS               = "ps -eo pid,args"
 
 module Util
   private
@@ -60,8 +66,7 @@ module Util
     end
 
     grace_time
-    remaining = (ps_stats.keys & process_stats.keys)
-    return if remaining.empty?
+    return if (remaining = ps_stats.keys & process_stats.keys).empty?
 
     remaining.each do |pid|
       puts %(%s: %s: Still not dead, killing process with KILL ...) % [why, pid]
@@ -69,8 +74,7 @@ module Util
     end
 
     grace_time
-    remaining = (ps_stats.keys & process_stats.keys)
-    return if remaining.empty?
+    return if (remaining = ps_stats.keys & process_stats.keys).empty?
 
     puts %(%s: %d processes STILL not dead (%s).) % [why, remaining.size, remaining.join(", ")]
   end
@@ -79,7 +83,7 @@ end
 module Stats
 
   def passenger_status
-    command("passenger-status") do |input, output|
+    command(PASSENGER_STATUS) do |input, output|
       output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/PID: (\d+)\s+Sessions: (\d+)\s+Processed: (\d+)\s*Uptime: ([\w ]+)/)
 
@@ -110,7 +114,7 @@ module Stats
   end
 
   def passenger_memory_stats
-    command("passenger-memory-stats") do |input, output|
+    command(PASSENGER_MEMORY_STATS) do |input, output|
       output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/([\d\.]+)\s+[\d\.]+ MB\s+([\d\.]+) MB\s+Rack: (.+)/)
 
@@ -140,7 +144,7 @@ module Stats
   end
 
   def ps_stats
-    command("ps -eo pid,args") do |input, output|
+    command(PS_STATS) do |input, output|
       output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/(\d+)\s+Rack: (.+)$/)
         pid, name = *match.captures
