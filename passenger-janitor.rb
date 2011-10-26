@@ -272,7 +272,7 @@ end
 # Numbers are in megabytes or seconds.
 defaults = {
   :fat     => 1024,
-  :old     => 3600 * 4,
+  :old     => 3600 * 24,
   :stale   => 3600
 }
 
