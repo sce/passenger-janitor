@@ -141,11 +141,12 @@ module Stats
       output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/([\d\.]+)\s+[\d\.]+ MB\s+([\d\.]+) MB\s+Rack: (.+)/)
 
-        pid, mem, name = *match.captures
+        pid, mem, path = *match.captures
+        next hash unless @options[:path].find {|p| path.match p}
 
         hash[pid.to_i] = {
           :mem  => mem.to_i,
-          :name => name
+          :path => path.strip
         }
 
         hash
@@ -170,9 +171,11 @@ module Stats
     command(PS_STATS) do |input, output|
       output.readlines.inject({}) do |hash, line|
         next hash unless match = line.match(/(\d+)\s+Rack: (.+)$/)
-        pid, name = *match.captures
+        pid, path = *match.captures
 
-        hash[pid.to_i] = { :name => name.strip }
+        next hash unless @options[:path].find {|p| path.match p}
+
+        hash[pid.to_i] = { :path => path.strip }
         hash
       end
     end
@@ -248,6 +251,11 @@ class PassengerJanitor
     actions = CleanupActions.instance_methods.find_all {|name| @options.key? name}
     abort @options[:opts].to_s if actions.empty?
 
+    # Remove "catch all"-path regex if user supplied any.
+    @options[:path].shift if @options[:path].size > 1
+
+    puts %(Can't find any processes matching any of %s regular expressions!) % @options[:path].inspect unless ps_stats.size > 0
+
     @logs = @options[:tail].compact.map {|file| tail file }
 
     actions.each do |name|
@@ -261,6 +269,7 @@ class PassengerJanitor
 
 end
 
+# Numbers are in megabytes or seconds.
 defaults = {
   :fat     => 1024,
   :old     => 3600 * 4,
@@ -270,6 +279,7 @@ defaults = {
 options = {
   :grace   => 30,
   :dry_run => false,
+  :path    => [".+"],
   :tail    => []
 }
 
@@ -316,6 +326,10 @@ OptionParser.new do |opts|
 
   opts.separator ""
   opts.separator "Common options:"
+
+  opts.on("-pREGEX", "--path=REGEX1,REGEX2", Array,
+    "Only touch processes matching REGEX path (#{options[:path].first}).") \
+    {|s| options[:path].concat s }
 
   opts.on("-gSECONDS", "--grace SECONDS", Integer,
     "Give processes SECONDS (#{options[:grace]}) to die gracefully.") \
