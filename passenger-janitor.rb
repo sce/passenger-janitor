@@ -42,11 +42,11 @@ module Util
   # Yield with input/output pipe to given command. Abort if stderr from command
   # is non-empty.
   def command(cmd)
-    Open3.popen3(cmd) do |input, output, err|
-      errors = err.readlines
+    Open3.popen3(cmd) do |stdin, stdout, stderr|
+      errors = stderr.readlines
       abort "%s\n%s" % [cmd, errors.join] if errors.any?
 
-      yield input, output if block_given?
+      yield stdin, stdout if block_given?
     end
   end
 
@@ -55,16 +55,16 @@ module Util
   def tail(filename)
     if filename
       if block_given?
-        File.open(filename) do |pipe|
-          pipe.seek(0, IO::SEEK_END)
+        File.open(filename) do |file|
+          file.seek(0, IO::SEEK_END)
 
-          yield pipe
+          yield file
         end
 
       else
-        pipe = File.open(filename)
-        pipe.seek(0, IO::SEEK_END)
-        pipe
+        file = File.open(filename)
+        file.seek(0, IO::SEEK_END)
+        file
       end
 
     elsif block_given?
